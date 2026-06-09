@@ -15,6 +15,8 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
+      # --ignore-scripts skips native builds of transitive deps (e.g. isolated-vm,
+      # pulled in by n8n-workflow). We only compile against types, never run n8n.
+      - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run build

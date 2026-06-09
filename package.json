@@ -1,0 +1,72 @@
+{
+  "name": "@mlabsh/n8n-nodes-mlab",
+  "version": "0.1.0",
+  "description": "n8n community nodes for mlab.sh — core scanning (domain/IP/crypto/file), CVE vulnerability search, and threat actor intelligence.",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "mlab",
+    "mlab.sh",
+    "security",
+    "cve",
+    "vulnerability",
+    "threat-intelligence",
+    "threat-actor",
+    "osint",
+    "scanner"
+  ],
+  "license": "MIT",
+  "homepage": "https://mlab.sh",
+  "author": {
+    "name": "mlab.sh",
+    "email": "support@mlab.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mlab-sh/n8n-nodes-mlab.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mlab-sh/n8n-nodes-mlab/issues"
+  },
+  "engines": {
+    "node": ">=20.15"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "npx rimraf dist && tsc && gulp build:icons",
+    "dev": "tsc --watch",
+    "format": "prettier nodes credentials --write",
+    "lint": "eslint nodes credentials package.json",
+    "lintfix": "eslint nodes credentials package.json --fix",
+    "prepublishOnly": "npm run build && npm run lint -- --quiet"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/MlabApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/MlabCore/MlabCore.node.js",
+      "dist/nodes/MlabCve/MlabCve.node.js",
+      "dist/nodes/MlabThreatActors/MlabThreatActors.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.42",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-n8n-nodes-base": "^1.16.3",
+    "gulp": "^5.0.0",
+    "jsonc-eslint-parser": "^2.4.2",
+    "n8n-workflow": "*",
+    "prettier": "^3.3.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.5.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}

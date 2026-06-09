@@ -1,0 +1,94 @@
+name: Publish to npm
+
+# Manual trigger only — run it from the "Actions" tab with the "Run workflow" button.
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Version bump before publishing (none = publish package.json version as-is)'
+        type: choice
+        required: true
+        default: none
+        options:
+          - none
+          - patch
+          - minor
+          - major
+      dist_tag:
+        description: 'npm dist-tag to publish under'
+        type: string
+        required: true
+        default: latest
+      dry_run:
+        description: 'Build + pack only, do NOT publish'
+        type: boolean
+        required: true
+        default: false
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the version bump commit + tag
+      id-token: write # required for npm provenance
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Bump version
+        if: ${{ inputs.release_type != 'none' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version ${{ inputs.release_type }} -m "chore(release): %s [skip ci]"
+          git push --follow-tags
+
+      - name: Show resolved version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Pack (dry run)
+        if: ${{ inputs.dry_run }}
+        run: |
+          npm pack
+          echo "### 📦 Dry run — package built, NOT published" >> "$GITHUB_STEP_SUMMARY"
+          echo "Version: \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh *.tgz >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
+        run: npm publish --access public --provenance --tag "${{ inputs.dist_tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Summary
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "### ✅ Published @mlabsh/n8n-nodes-mlab" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- dist-tag: \`${{ inputs.dist_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- https://www.npmjs.com/package/@mlabsh/n8n-nodes-mlab" >> "$GITHUB_STEP_SUMMARY"

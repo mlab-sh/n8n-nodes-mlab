@@ -6,7 +6,7 @@ import type {
 	ILoadOptionsFunctions,
 	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError } from 'n8n-workflow';
+import { NodeApiError, sleep } from 'n8n-workflow';
 
 /**
  * Public base URLs for the three mlab.sh services. The core API base URL can be
@@ -123,8 +123,4 @@ export async function pollDomainScan(
 			}s. Try the "Get Results" operation later.`,
 		},
 	);
-}
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
 }

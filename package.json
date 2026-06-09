@@ -1,6 +1,6 @@
 {
   "name": "@mlabsh/n8n-nodes-mlab",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "n8n community nodes for mlab.sh — core scanning (domain/IP/crypto/file), CVE vulnerability search, and threat actor intelligence.",
   "keywords": [
     "n8n-community-node-package",

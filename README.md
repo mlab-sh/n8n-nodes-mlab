@@ -1,29 +1,29 @@
 # @mlabsh/n8n-nodes-mlab
 
-n8n community nodes for [**mlab.sh**](https://mlab.sh) — bring core scanning, CVE
+n8n community node for [**mlab.sh**](https://mlab.sh) — bring core scanning, CVE
 vulnerability intelligence and threat-actor data into your n8n workflows.
 
-This package ships three nodes:
+The package ships a single **mlab.sh** node whose surfaces are exposed as resources:
 
-| Node | Service | Auth |
-|------|---------|------|
-| **mlab.sh Core** | `mlab.sh/api/v1` — domain / IP / crypto / file scans | API key |
-| **mlab.sh CVE** | `vuln.mlab.sh/api/v1` — CVE search & details | none (public) |
-| **mlab.sh Threat Actors** | `actors.mlab.sh/api/v1` — threat-actor intel | none (public) |
+| Resource | Service | Auth |
+|----------|---------|------|
+| **Domain / IP Address / Crypto Address / File / Quota** (Core) | `mlab.sh/api/v1` — domain / IP / crypto / file scans | API key |
+| **CVE** | `vuln.mlab.sh/api/v1` — CVE search & details | none (public) |
+| **Threat Actor** | `actors.mlab.sh/api/v1` — threat-actor intel | none (public) |
 
-[Installation](#installation) · [Credentials](#credentials) · [Operations](#operations) · [Local development](#local-development) · [Publishing to npm](#publishing-to-npm) · [Becoming a verified / official node](#becoming-a-verified--official-node)
+[Installation](#installation) · [Credentials](#credentials) · [Resources & operations](#resources--operations) · [Examples](#examples)
 
 ---
 
 ## Installation
 
-### From the n8n UI (recommended)
+### From the n8n UI
 
 1. In n8n, go to **Settings → Community Nodes → Install**.
 2. Enter the npm package name: `@mlabsh/n8n-nodes-mlab`.
 3. Agree to the risk prompt and install.
 
-> Community nodes require `N8N_COMMUNITY_PACKAGES_ENABLED=true` (the default on self-hosted instances). On **n8n Cloud**, only *verified* community nodes can be installed (see below).
+> Community nodes require `N8N_COMMUNITY_PACKAGES_ENABLED=true` (the default on self-hosted instances).
 
 ### Manually (self-hosted)
 
@@ -32,97 +32,88 @@ cd ~/.n8n/nodes      # or your N8N_CUSTOM_EXTENSIONS path
 npm install @mlabsh/n8n-nodes-mlab
 ```
 
-Restart n8n afterwards.
+Restart n8n afterwards. The **mlab.sh** node then appears in the nodes panel.
 
 ---
 
 ## Credentials
 
-Only the **Core** node needs credentials.
+Only the **Core** resources (Domain / IP Address / Crypto Address / File / Quota) need credentials. The credential field is hidden when a public resource (CVE / Threat Actor) is selected.
 
 1. Create an API key at **mlab.sh → Account → Settings → API Keys** (it starts with `mlab_`).
 2. In n8n, add a new **mlab.sh API** credential and paste the key.
 3. The node sends it as `Authorization: token mlab_...`. The credential's *Test* button hits `GET /limit/ip` to validate the key.
 
-The **CVE** and **Threat Actors** nodes call public, unauthenticated APIs — no credential required.
+The **CVE** and **Threat Actor** resources call public, unauthenticated APIs — no credential required.
 
 ---
 
-## Operations
+## Resources & operations
 
-### mlab.sh Core
+Pick a **Resource**, then an **Operation**. The node processes every input item and outputs the raw JSON returned by mlab.sh.
 
-- **Domain → Scan** — launches `POST /scan/domain`. With *Wait for Completion* on (default) it polls `/scan/domain/status` and returns the full `/scan/domain/results` payload (subdomains, DNS, SSL, security.txt…).
-- **Domain → Get Status** / **Get Results** — for managing an async scan yourself.
-- **IP → Lookup** — `GET /scan/ip` (geolocation, ASN, ownership).
-- **Crypto → Lookup** — `GET /scan/crypto` (sanctions, labels, risk score). Chain auto-detected or forced.
-- **File → Upload** — `POST /upload/file` from an input binary field (max 10MB) and returns the `sha256`.
-- **File → Get Results** — `GET /scan/file/results?sha256=…`.
-- **Quota → Get** — remaining daily quota for a scan type (`GET /limit/{type}`).
+### Core — Domain
 
-### mlab.sh CVE
+| Operation | Endpoint | Notes |
+|-----------|----------|-------|
+| **Scan** | `POST /scan/domain` | Launches a scan. With **Wait for Completion** on (default) it polls `/scan/domain/status` and returns the full `/scan/domain/results` payload (subdomains, DNS, SSL, security.txt…). Disable it to return only the job acknowledgement. **Timeout (Seconds)** controls how long polling waits. |
+| **Get Status** | `GET /scan/domain/status` | Check an async scan you launched yourself. |
+| **Get Results** | `GET /scan/domain/results` | Fetch results once a scan has finished. |
 
-- **Search** — `GET /cve?q=…` with optional `severity`, `dateStart`, `exact`, `kev` filters.
-- **Get** — `GET /cve/CVE-XXXX-XXXX` (full detail incl. EPSS & KEV).
-- **Get Latest** — `GET /cve/latest` (last 7 days).
+### Core — IP Address
 
-### mlab.sh Threat Actors
+| Operation | Endpoint | Notes |
+|-----------|----------|-------|
+| **Lookup** | `GET /scan/ip` | Geolocation, ASN and ownership for an IPv4/IPv6 address. |
 
-- **List / Search** — `GET /actors` with `origin`, `motivation`, `sector`, `limit`, `offset`.
-- **Get** — `GET /actors/:slug` (aliases, tools, CVEs, techniques).
-- **Get by CVE** — `GET /cves/CVE-XXXX-XXXX/actors` (reverse lookup).
+### Core — Crypto Address
+
+| Operation | Endpoint | Notes |
+|-----------|----------|-------|
+| **Lookup** | `GET /scan/crypto` | Sanctions, labels and risk score. **Chain** can be auto-detected (leave blank) or forced (BTC, ETH, SOL, TRON, …). |
+
+### Core — File
+
+| Operation | Endpoint | Notes |
+|-----------|----------|-------|
+| **Upload** | `POST /upload/file` | Uploads the file from the **Input Binary Field** (max 10 MB) and returns its `sha256`. |
+| **Get Results** | `GET /scan/file/results` | Fetch analysis results by **SHA-256** hash. |
+
+### Core — Quota
+
+| Operation | Endpoint | Notes |
+|-----------|----------|-------|
+| **Get** | `GET /limit/{type}` | Remaining daily quota for a **Scan Type** (domain / IP / file / crypto). |
+
+### CVE
+
+| Operation | Endpoint | Notes |
+|-----------|----------|-------|
+| **Search** | `GET /cve?q=…` | Search by keyword, vendor or product. Optional **Filters**: severity, published-after date, exact match, KEV-only. |
+| **Get** | `GET /cve/{id}` | Full detail for a CVE, including EPSS and KEV data. |
+| **Get Latest** | `GET /cve/latest` | Vulnerabilities from the last 7 days. |
+
+### Threat Actor
+
+| Operation | Endpoint | Notes |
+|-----------|----------|-------|
+| **List / Search** | `GET /actors` | Optional **Filters**: origin, motivation, sector. Paginate with **Limit** / **Offset**. |
+| **Get** | `GET /actors/{slug}` | A single actor by slug, including aliases, tools, CVEs and techniques. |
+| **Get by CVE** | `GET /cves/{id}/actors` | Reverse lookup — which actors are known to exploit a given CVE. |
 
 ---
 
-## Local development
+## Examples
 
-```bash
-npm install
-npm run build         # compiles TS → dist/ and copies icons
-npm run lint          # n8n-nodes-base lint rules
+**Enrich a domain on demand.** Webhook → **mlab.sh** (Resource: *Domain*, Operation: *Scan*, Wait for Completion: on) → use the returned subdomains / SSL / DNS data downstream.
 
-# Link into a local n8n for testing:
-npm link
-cd ~/.n8n/nodes && npm link @mlabsh/n8n-nodes-mlab
-n8n start
-```
+**Vulnerability watch.** Schedule Trigger (daily) → **mlab.sh** (Resource: *CVE*, Operation: *Get Latest*) → Filter on `severity = CRITICAL` → notify Slack / email.
 
-Requires Node ≥ 20.15 (same as n8n).
+**Threat-actor context for an alert.** **mlab.sh** (Resource: *Threat Actor*, Operation: *Get by CVE*, CVE ID: `CVE-2021-44228`) → attach the matching actors to your incident record.
 
----
+**Crypto / IP triage.** Feed a list of addresses or IPs into **mlab.sh** (Resource: *Crypto Address* or *IP Address*, Operation: *Lookup*); the node runs once per input item and returns risk/ownership data per row.
 
-## Publishing to npm
-
-```bash
-npm login                       # scope @mlabsh must exist / you must own it
-npm run build
-npm publish --access public     # scoped packages are private by default
-```
-
-`prepublishOnly` re-runs the build + lint, and `.npmignore` ships only `dist/`, `package.json`, `README.md` and `LICENSE`.
-
----
-
-## Becoming a verified / official node
-
-n8n has three tiers. This package starts at tier 1.
-
-1. **Community node (now).** Any package named `n8n-nodes-*` (or scoped `@scope/n8n-nodes-*`) published to npm with the `n8n-community-node-package` keyword. Installable on self-hosted n8n immediately after `npm publish`.
-
-2. **Verified community node** (installable on n8n Cloud). Submit the package for n8n's review. Requirements:
-   - Package name matches `n8n-nodes-*` / `@scope/n8n-nodes-*` ✅
-   - `package.json` declares `n8n.n8nNodesApiVersion`, `nodes`, `credentials` ✅
-   - Passes `eslint-plugin-n8n-nodes-base` with **zero errors** on the `community`, `nodes` and `credentials` rulesets — run `npm run lint` ✅ (a few opinionated rules are relaxed in `.eslintrc.js`; tighten them before submitting)
-   - No runtime dependencies beyond `n8n-workflow` (this package has none) ✅
-   - Icons, `description`, `documentationUrl`, codex/category metadata present
-   - Submit via the form linked from n8n's docs: **Creating nodes → Submit community nodes for verification** (<https://docs.n8n.io/integrations/creating-nodes/deploy/submit-community-nodes/>). n8n reviews the source and, once approved, the node appears in the in-app nodes panel and is installable on Cloud.
-
-3. **Official / built-in node** (ships inside n8n core). This is owned by n8n, not by package authors. The realistic path:
-   - Get adoption + verification first (tier 2).
-   - Open a discussion/issue on <https://github.com/n8n-io/n8n> proposing the integration, or contact n8n's partnerships team (integrations are often prioritised via the partner program).
-   - If accepted, the node source is contributed into the `n8n-nodes-base` package via PR following n8n's contribution guide. From then on n8n maintains it and the community package can be deprecated.
-
-**Recommended sequence:** publish this package → gather usage → submit for verification (tier 2) → propose upstreaming to n8n core (tier 3).
+> Each Core operation consumes daily quota. Use the **Quota → Get** operation to check remaining budget before large batch runs.
 
 ---
 

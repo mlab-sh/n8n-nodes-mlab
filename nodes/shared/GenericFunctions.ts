@@ -16,6 +16,10 @@ import { NodeApiError, sleep } from 'n8n-workflow';
 export const MLAB_CVE_BASE_URL = 'https://vuln.mlab.sh/api/v1';
 export const MLAB_ACTORS_BASE_URL = 'https://actors.mlab.sh/api/v1';
 
+// Credentials are decrypted on every getCredentials call; the base URL cannot
+// change during one execution, so read it once per execution context.
+const baseUrlCache = new WeakMap<object, string>();
+
 /**
  * Authenticated request against the mlab.sh core API. Uses the `mlabApi`
  * credential, which injects the `Authorization: token <key>` header.
@@ -28,8 +32,14 @@ export async function mlabCoreApiRequest(
 	qs: IDataObject = {},
 	option: Partial<IHttpRequestOptions> = {},
 ): Promise<any> {
-	const credentials = await this.getCredentials('mlabApi');
-	const baseUrl = ((credentials.baseUrl as string) || 'https://mlab.sh/api/v1').replace(/\/$/, '');
+	let baseUrl = baseUrlCache.get(this);
+	if (baseUrl === undefined) {
+		const credentials = await this.getCredentials('mlabApi');
+		baseUrl = ((credentials.baseUrl as string) || 'https://mlab.sh/api/v1').replace(/\/$/, '');
+		baseUrlCache.set(this, baseUrl);
+	}
+	// The upload endpoint lives at the site root, not under /api/v1.
+	if (resource.startsWith('/upload/')) baseUrl = baseUrl.replace(/\/api\/v1$/, '');
 
 	const options: IHttpRequestOptions = {
 		method,

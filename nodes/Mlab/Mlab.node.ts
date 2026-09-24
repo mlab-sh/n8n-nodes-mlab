@@ -15,6 +15,59 @@ import {
 	MLAB_ACTORS_BASE_URL,
 } from '../shared/GenericFunctions';
 
+/** Split a pasted list on commas, whitespace or new lines, dropping blanks and duplicates. */
+function splitList(raw: string): string[] {
+	return [...new Set(raw.split(/[\s,;]+/).filter(Boolean))];
+}
+
+/**
+ * Bulk hash / crypto lookups. The values of every input item are pooled and sent
+ * in as few requests as the API allows (500 hashes or 100 addresses per call),
+ * instead of one request per item. Crypto items are grouped by chain, since the
+ * API applies one chain to a whole batch. Each output item is one API response,
+ * paired with the input items that fed it.
+ */
+async function executeBulk(
+	this: IExecuteFunctions,
+	items: INodeExecutionData[],
+	resource: 'hash' | 'crypto',
+): Promise<INodeExecutionData[]> {
+	const max = resource === 'hash' ? 500 : 100;
+	const field = resource === 'hash' ? 'hashes' : 'addresses';
+	const groups = new Map<string, { values: Set<string>; items: number[] }>();
+
+	for (let i = 0; i < items.length; i++) {
+		const chain = resource === 'crypto' ? (this.getNodeParameter('chain', i) as string) : '';
+		let group = groups.get(chain);
+		if (!group) groups.set(chain, (group = { values: new Set(), items: [] }));
+		for (const v of splitList(this.getNodeParameter(field, i) as string)) group.values.add(v);
+		group.items.push(i);
+	}
+
+	const out: INodeExecutionData[] = [];
+	for (const [chain, group] of groups) {
+		const values = [...group.values];
+		const pairedItem = group.items.map((item) => ({ item }));
+		for (let start = 0; start < values.length; start += max) {
+			const body: IDataObject = { [field]: values.slice(start, start + max) };
+			if (chain) body.chain = chain;
+			try {
+				const json = (await mlabCoreApiRequest.call(
+					this,
+					'POST',
+					resource === 'hash' ? '/scan/hash' : '/scan/crypto',
+					body,
+				)) as IDataObject;
+				out.push({ json, pairedItem });
+			} catch (error) {
+				if (!this.continueOnFail()) throw error;
+				out.push({ json: { error: (error as Error).message }, pairedItem });
+			}
+		}
+	}
+	return out;
+}
+
 export class Mlab implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'mlab.sh',
@@ -24,7 +77,7 @@ export class Mlab implements INodeType {
 		version: 1,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description:
-			'mlab.sh security tooling: core scanning (domain/IP/crypto/file), CVE search and threat actor intelligence',
+			'mlab.sh security tooling: domain, IP, crypto, file, hash, URL, email, phone, MAC and IOC analysis, CVE search and threat actor intelligence',
 		defaults: {
 			name: 'mlab.sh',
 		},
@@ -38,7 +91,19 @@ export class Mlab implements INodeType {
 				required: true,
 				displayOptions: {
 					show: {
-						resource: ['domain', 'ip', 'crypto', 'file', 'quota'],
+						resource: [
+								'domain',
+								'ip',
+								'crypto',
+								'file',
+								'quota',
+								'hash',
+								'url',
+								'email',
+								'phone',
+								'mac',
+								'ioc',
+							],
 					},
 				},
 			},
@@ -53,10 +118,16 @@ export class Mlab implements INodeType {
 					{ name: 'Crypto Address', value: 'crypto' },
 					{ name: 'CVE', value: 'cve' },
 					{ name: 'Domain', value: 'domain' },
+					{ name: 'Email Address', value: 'email' },
 					{ name: 'File', value: 'file' },
+					{ name: 'Hash', value: 'hash' },
+					{ name: 'IOC', value: 'ioc' },
 					{ name: 'IP Address', value: 'ip' },
+					{ name: 'MAC Address', value: 'mac' },
+					{ name: 'Phone Number', value: 'phone' },
 					{ name: 'Quota', value: 'quota' },
 					{ name: 'Threat Actor', value: 'threatActor' },
+					{ name: 'URL', value: 'url' },
 				],
 				default: 'domain',
 			},
@@ -72,10 +143,22 @@ export class Mlab implements INodeType {
 				displayOptions: { show: { resource: ['domain'] } },
 				options: [
 					{
-						name: 'Scan',
-						value: 'scan',
-						action: 'Scan a domain',
-						description: 'Launch a domain scan and (optionally) wait for the results',
+						name: 'Capture Network Requests',
+						value: 'networkRequests',
+						action: 'Capture the network requests of a page',
+						description:
+							'Load a URL in a headless browser and list every request it makes. Counts as one domain scan.',
+					},
+					{
+						name: 'Get Results',
+						value: 'results',
+						action: 'Get the results of a domain scan',
+					},
+					{
+						name: 'Get SSL Certificates',
+						value: 'ssl',
+						action: 'Get SSL certificate history of a domain',
+						description: 'Certificates seen for the domain in certificate transparency logs',
 					},
 					{
 						name: 'Get Status',
@@ -83,9 +166,10 @@ export class Mlab implements INodeType {
 						action: 'Get the status of a domain scan',
 					},
 					{
-						name: 'Get Results',
-						value: 'results',
-						action: 'Get the results of a domain scan',
+						name: 'Scan',
+						value: 'scan',
+						action: 'Scan a domain',
+						description: 'Launch a domain scan and (optionally) wait for the results',
 					},
 				],
 				default: 'scan',
@@ -97,8 +181,20 @@ export class Mlab implements INodeType {
 				required: true,
 				default: '',
 				placeholder: 'example.com',
-				displayOptions: { show: { resource: ['domain'] } },
+				displayOptions: {
+					show: { resource: ['domain'], operation: ['scan', 'status', 'results', 'ssl'] },
+				},
 				description: 'The domain to scan (without protocol)',
+			},
+			{
+				displayName: 'Page URL',
+				name: 'pageUrl',
+				type: 'string',
+				required: true,
+				default: '',
+				placeholder: 'https://example.com',
+				displayOptions: { show: { resource: ['domain'], operation: ['networkRequests'] } },
+				description: 'The page to load',
 			},
 			{
 				displayName: 'Wait for Completion',
@@ -167,6 +263,12 @@ export class Mlab implements INodeType {
 						action: 'Look up a crypto address',
 						description: 'Check sanctions, labels and risk score for a crypto address',
 					},
+					{
+						name: 'Bulk Lookup',
+						value: 'bulk',
+						action: 'Look up many crypto addresses',
+						description: 'Look up to 100 addresses in one request',
+					},
 				],
 				default: 'lookup',
 			},
@@ -177,8 +279,19 @@ export class Mlab implements INodeType {
 				required: true,
 				default: '',
 				placeholder: '0x...',
-				displayOptions: { show: { resource: ['crypto'] } },
+				displayOptions: { show: { resource: ['crypto'], operation: ['lookup'] } },
 				description: 'The crypto address to look up',
+			},
+			{
+				displayName: 'Addresses',
+				name: 'addresses',
+				type: 'string',
+				typeOptions: { rows: 4 },
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['crypto'], operation: ['bulk'] } },
+				description:
+					'Addresses separated by commas, spaces or new lines. Values from all input items are pooled and sent 100 per request.',
 			},
 			{
 				displayName: 'Chain',
@@ -186,7 +299,8 @@ export class Mlab implements INodeType {
 				type: 'options',
 				default: '',
 				displayOptions: { show: { resource: ['crypto'] } },
-				description: 'Blockchain of the address. Leave on "Auto-detect" when unsure.',
+				description:
+					'Blockchain of the address. Leave on "Auto-detect" when unsure. For bulk lookups it applies to every address.',
 				options: [
 					{ name: 'Arbitrum', value: 'arbitrum' },
 					{ name: 'Auto-Detect', value: '' },
@@ -226,6 +340,12 @@ export class Mlab implements INodeType {
 						action: 'Get file analysis results',
 						description: 'Fetch analysis results by SHA-256 hash',
 					},
+					{
+						name: 'Get Tool Output',
+						value: 'output',
+						action: 'Get the raw output of one analysis tool',
+						description: 'Raw output of a single tool listed in the results',
+					},
 				],
 				default: 'upload',
 			},
@@ -244,8 +364,237 @@ export class Mlab implements INodeType {
 				type: 'string',
 				required: true,
 				default: '',
-				displayOptions: { show: { resource: ['file'], operation: ['results'] } },
+				displayOptions: { show: { resource: ['file'], operation: ['results', 'output'] } },
 				description: 'SHA-256 hash returned by the upload operation',
+			},
+			{
+				displayName: 'Tool',
+				name: 'tool',
+				type: 'string',
+				required: true,
+				default: '',
+				placeholder: 'yara',
+				displayOptions: { show: { resource: ['file'], operation: ['output'] } },
+				description: 'Tool name, as listed in the file results',
+			},
+
+			// ======================================================================
+			//                              Core: Hash
+			// ======================================================================
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['hash'] } },
+				options: [
+					{
+						name: 'Lookup',
+						value: 'lookup',
+						action: 'Look up a file hash',
+						description: 'Known-good / known-malicious verdict for an MD5, SHA-1 or SHA-256',
+					},
+					{
+						name: 'Bulk Lookup',
+						value: 'bulk',
+						action: 'Look up many file hashes',
+						description: 'Look up to 500 hashes in one request',
+					},
+				],
+				default: 'lookup',
+			},
+			{
+				displayName: 'Hash',
+				name: 'hash',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['hash'], operation: ['lookup'] } },
+				description: 'MD5, SHA-1, SHA-256 or SHA-512 hex digest',
+			},
+			{
+				displayName: 'Hashes',
+				name: 'hashes',
+				type: 'string',
+				typeOptions: { rows: 4 },
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['hash'], operation: ['bulk'] } },
+				description:
+					'Digests separated by commas, spaces or new lines. Values from all input items are pooled and sent 500 per request.',
+			},
+
+			// ======================================================================
+			//                    Core: URL / Email / Phone / MAC
+			// ======================================================================
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['url'] } },
+				options: [
+					{
+						name: 'Analyze',
+						value: 'analyze',
+						action: 'Analyze a URL',
+						description: 'Phishing shapes, embedded redirects and what mlab knows about the host',
+					},
+				],
+				default: 'analyze',
+			},
+			{
+				displayName: 'URL',
+				name: 'url',
+				type: 'string',
+				required: true,
+				default: '',
+				placeholder: 'https://bit.ly/3xYz',
+				displayOptions: { show: { resource: ['url'] } },
+			},
+			{
+				displayName: 'Follow Redirects',
+				name: 'resolve',
+				type: 'boolean',
+				default: false,
+				displayOptions: { show: { resource: ['url'] } },
+				description:
+					'Whether to visit the URL and follow it to its final destination. Off by default: the link is never fetched otherwise.',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['email'] } },
+				options: [
+					{
+						name: 'Analyze',
+						value: 'analyze',
+						action: 'Analyze an email address',
+						description: 'Mailbox type, spoofability of the domain and risk score',
+					},
+				],
+				default: 'analyze',
+			},
+			{
+				displayName: 'Email',
+				name: 'email',
+				type: 'string',
+				placeholder: 'name@email.com',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['email'] } },
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['phone'] } },
+				options: [
+					{
+						name: 'Analyze',
+						value: 'analyze',
+						action: 'Analyze a phone number',
+						description: 'Validity, line type, allocated operator and scam shapes',
+					},
+				],
+				default: 'analyze',
+			},
+			{
+				displayName: 'Phone Number',
+				name: 'number',
+				type: 'string',
+				required: true,
+				default: '',
+				placeholder: '+33612345678',
+				displayOptions: { show: { resource: ['phone'] } },
+				description: 'Phone number in E.164 form',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['mac'] } },
+				options: [
+					{
+						name: 'Lookup',
+						value: 'lookup',
+						action: 'Look up a MAC address',
+						description: 'Vendor, randomization, virtualization and every notation',
+					},
+				],
+				default: 'lookup',
+			},
+			{
+				displayName: 'MAC Address',
+				name: 'mac',
+				type: 'string',
+				required: true,
+				default: '',
+				placeholder: '00:1A:2B:3C:4D:5E',
+				displayOptions: { show: { resource: ['mac'] } },
+			},
+
+			// ======================================================================
+			//                              Core: IOC
+			// ======================================================================
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['ioc'] } },
+				options: [
+					{
+						name: 'Extract',
+						value: 'extract',
+						action: 'Extract indicators from text',
+						description: 'Pull every indicator out of raw text, with optional SMS threat scoring',
+					},
+				],
+				default: 'extract',
+			},
+			{
+				displayName: 'Text',
+				name: 'text',
+				type: 'string',
+				typeOptions: { rows: 6 },
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['ioc'] } },
+				description: 'Raw text (report, log, email, SMS), up to 1 MB',
+			},
+			{
+				displayName: 'Risk Scoring',
+				name: 'risk',
+				type: 'options',
+				default: '',
+				displayOptions: { show: { resource: ['ioc'] } },
+				description: 'Score the text as an SMS threat (smishing)',
+				options: [
+					{ name: 'Off', value: '' },
+					{
+						name: 'Fast',
+						value: 'fast',
+						description: 'Offline scorer, safe on a blocking path',
+					},
+					{
+						name: 'Deep',
+						value: 'deep',
+						description: 'Also unmasks short links and checks IP hosts (network calls, slower)',
+					},
+				],
+			},
+			{
+				displayName: 'Country',
+				name: 'country',
+				type: 'string',
+				default: 'fr',
+				displayOptions: { show: { resource: ['ioc'], risk: ['fast', 'deep'] } },
+				description: 'Keyword and brand pack used by the scorer',
 			},
 
 			// ======================================================================
@@ -488,11 +837,15 @@ export class Mlab implements INodeType {
 		const resource = this.getNodeParameter('resource', 0) as string;
 		const operation = this.getNodeParameter('operation', 0) as string;
 
+		if ((resource === 'hash' || resource === 'crypto') && operation === 'bulk') {
+			return [await executeBulk.call(this, items, resource)];
+		}
+
 		for (let i = 0; i < items.length; i++) {
 			try {
 				let responseData: IDataObject | IDataObject[] = {};
 
-				if (resource === 'domain') {
+				if (resource === 'domain' && operation !== 'networkRequests') {
 					const domain = this.getNodeParameter('domain', i) as string;
 
 					if (operation === 'scan') {
@@ -517,15 +870,28 @@ export class Mlab implements INodeType {
 						responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/domain/results', {}, {
 							domain,
 						})) as IDataObject;
+					} else if (operation === 'ssl') {
+						responseData = (await mlabCoreApiRequest.call(this, 'GET', '/domain/ssl', {}, {
+							domain,
+						})) as IDataObject[];
 					}
+				} else if (resource === 'domain' && operation === 'networkRequests') {
+					const url = this.getNodeParameter('pageUrl', i) as string;
+					responseData = (await mlabCoreApiRequest.call(
+						this,
+						'GET',
+						'/scan/domain/loadnetworkrequest',
+						{},
+						{ url },
+					)) as IDataObject;
 				} else if (resource === 'ip') {
 					const ip = this.getNodeParameter('ip', i) as string;
 					responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/ip', {}, {
 						ip,
 					})) as IDataObject;
 				} else if (resource === 'crypto') {
-					const address = this.getNodeParameter('address', i) as string;
 					const chain = this.getNodeParameter('chain', i) as string;
+					const address = this.getNodeParameter('address', i) as string;
 					const qs: IDataObject = { address };
 					if (chain) qs.chain = chain;
 					responseData = (await mlabCoreApiRequest.call(
@@ -559,7 +925,46 @@ export class Mlab implements INodeType {
 						responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/file/results', {}, {
 							sha256,
 						})) as IDataObject;
+					} else if (operation === 'output') {
+						responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/file/output', {}, {
+							sha256: this.getNodeParameter('sha256', i) as string,
+							tool: this.getNodeParameter('tool', i) as string,
+						})) as IDataObject;
 					}
+				} else if (resource === 'hash') {
+					responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/hash', {}, {
+						hash: this.getNodeParameter('hash', i) as string,
+					})) as IDataObject;
+				} else if (resource === 'url') {
+					const qs: IDataObject = { url: this.getNodeParameter('url', i) as string };
+					if (this.getNodeParameter('resolve', i) as boolean) qs.resolve = 'true';
+					responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/url', {}, qs)) as IDataObject;
+				} else if (resource === 'email') {
+					responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/email', {}, {
+						email: this.getNodeParameter('email', i) as string,
+					})) as IDataObject;
+				} else if (resource === 'phone') {
+					responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/phone', {}, {
+						number: this.getNodeParameter('number', i) as string,
+					})) as IDataObject;
+				} else if (resource === 'mac') {
+					responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/mac', {}, {
+						mac: this.getNodeParameter('mac', i) as string,
+					})) as IDataObject;
+				} else if (resource === 'ioc') {
+					const risk = this.getNodeParameter('risk', i) as string;
+					const qs: IDataObject = {};
+					if (risk) {
+						qs.risk = risk;
+						qs.country = this.getNodeParameter('country', i) as string;
+					}
+					responseData = (await mlabCoreApiRequest.call(
+						this,
+						'POST',
+						'/scan/ioc',
+						{ text: this.getNodeParameter('text', i) as string },
+						qs,
+					)) as IDataObject;
 				} else if (resource === 'quota') {
 					const scanType = this.getNodeParameter('scanType', i) as string;
 					responseData = (await mlabCoreApiRequest.call(

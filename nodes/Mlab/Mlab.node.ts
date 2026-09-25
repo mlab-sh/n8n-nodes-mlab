@@ -4,8 +4,9 @@ import type {
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	JsonObject,
 } from 'n8n-workflow';
-import { NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import {
 	mlabCoreApiRequest,
@@ -60,7 +61,7 @@ async function executeBulk(
 				)) as IDataObject;
 				out.push({ json, pairedItem });
 			} catch (error) {
-				if (!this.continueOnFail()) throw error;
+				if (!this.continueOnFail()) throw new NodeApiError(this.getNode(), error as JsonObject);
 				out.push({ json: { error: (error as Error).message }, pairedItem });
 			}
 		}
@@ -72,17 +73,18 @@ export class Mlab implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'mlab.sh',
 		name: 'mlab',
-		icon: 'file:mlab.svg',
+		icon: { light: 'file:mlab.svg', dark: 'file:mlab.dark.svg' },
 		group: ['transform'],
 		version: 1,
+		usableAsTool: true,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description:
 			'mlab.sh security tooling: domain, IP, crypto, file, hash, URL, email, phone, MAC and IOC analysis, CVE search and threat actor intelligence',
 		defaults: {
 			name: 'mlab.sh',
 		},
-		inputs: ['main'],
-		outputs: ['main'],
+		inputs: [NodeConnectionTypes.Main],
+		outputs: [NodeConnectionTypes.Main],
 		credentials: [
 			{
 				name: 'mlabApi',
@@ -1063,7 +1065,8 @@ export class Mlab implements INodeType {
 					});
 					continue;
 				}
-				throw error;
+				if (error instanceof NodeOperationError) throw new NodeOperationError(this.getNode(), error, { itemIndex: i });
+				throw new NodeApiError(this.getNode(), error as JsonObject);
 			}
 		}
 

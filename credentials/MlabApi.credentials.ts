@@ -2,6 +2,7 @@ import type {
 	IAuthenticateGeneric,
 	ICredentialTestRequest,
 	ICredentialType,
+	Icon,
 	INodeProperties,
 } from 'n8n-workflow';
 
@@ -9,6 +10,8 @@ export class MlabApi implements ICredentialType {
 	name = 'mlabApi';
 
 	displayName = 'mlab.sh API';
+
+	icon: Icon = { light: 'file:../nodes/Mlab/mlab.svg', dark: 'file:../nodes/Mlab/mlab.dark.svg' };
 
 	documentationUrl = 'https://mlab.sh/developer/documentation';
 

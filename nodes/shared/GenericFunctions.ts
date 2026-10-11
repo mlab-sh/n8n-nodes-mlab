@@ -97,11 +97,12 @@ export async function mlabPublicApiRequest(
 
 /**
  * Poll a domain scan until it reaches the `success` state (or times out).
- * Returns the final results payload.
+ * Returns the v2 report or the legacy v1 results, per `output`.
  */
 export async function pollDomainScan(
 	this: IExecuteFunctions,
 	domain: string,
+	output: 'report' | 'results',
 	maxAttempts = 30,
 	intervalMs = 4000,
 ): Promise<IDataObject> {
@@ -112,9 +113,17 @@ export async function pollDomainScan(
 
 		const state = (status.status ?? status.state) as string | undefined;
 		if (state === 'success') {
-			return (await mlabCoreApiRequest.call(this, 'GET', '/scan/domain/results', {}, {
+			const payload = (await mlabCoreApiRequest.call(this, 'GET', `/scan/domain/${output}`, {}, {
 				domain,
 			})) as IDataObject;
+			// The status route reports any finished scan as `success`; only the v2
+			// report tells a failed scan apart.
+			if (payload.status === 'failed') {
+				throw new NodeApiError(this.getNode(), payload as JsonObject, {
+					message: `Domain scan failed for "${domain}"`,
+				});
+			}
+			return payload;
 		}
 		if (state === 'error') {
 			throw new NodeApiError(this.getNode(), status as JsonObject, {

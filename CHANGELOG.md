@@ -2,6 +2,26 @@
 
 All notable changes to `@mlabsh/n8n-nodes-mlab`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.2.0 - 2026-10-11
+
+Domain scan v2.
+
+### Added
+
+- **Domain → Get Report**: the full v2 scan report (`schema: "domain-report/2"`) with score, findings, registration, DNS, mail, AI, web, certificates and attack surface.
+- **Domain → Scan → Output**: pick the v2 report or the legacy v1 results once the scan finishes.
+
+### Changed
+
+- Node version 1.1: **Scan** returns the v2 report by default. Version 1 nodes keep the v1 results.
+- **Get Results** is renamed **Get Results (Legacy)**; the v1 payload is frozen upstream.
+
+- Dev dependencies updated: `npm audit` reports 0 vulnerabilities (down from 15). `gulp` is dropped; the icon copy is a `fs.cpSync` in the build script. `axios` is overridden to `^1.20.0`, because `n8n-workflow` pins a vulnerable version.
+
+### Fixed
+
+- A scan that ends `failed` now raises an error instead of returning a payload, when waiting on the v2 report.
+
 ## 1.1.2 - 2026-09-24
 
 Brings the node in line with the full public mlab.sh API.

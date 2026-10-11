@@ -56,9 +56,14 @@ Pick a **Resource**, then an **Operation**. The node processes every input item 
 
 | Operation | Endpoint | Notes |
 |-----------|----------|-------|
-| **Scan** | `POST /scan/domain` | Launches a scan. With **Wait for Completion** on (default) it polls `/scan/domain/status` and returns the full `/scan/domain/results` payload (subdomains, DNS, SSL, security.txt…). Disable it to return only the job acknowledgement. **Timeout (Seconds)** controls how long polling waits. |
-| **Get Status** | `GET /scan/domain/status` | Check an async scan you launched yourself. |
-| **Get Results** | `GET /scan/domain/results` | Fetch results once a scan has finished. |
+| **Scan** | `POST /scan/domain` | Launches a scan. With **Wait for Completion** on (default) it polls `/scan/domain/status` and returns the scan **Output**: the v2 report (default) or the legacy v1 results. A scan that ends `failed` raises an error. Disable it to return only the job acknowledgement. **Timeout (Seconds)** controls how long polling waits. |
+| **Get Status** | `GET /scan/domain/status` | `pending`, `scanning` (with `done` / `total` job progress) or `success`. |
+| **Get Report** | `GET /scan/domain/report` | The whole scan, `schema: "domain-report/2"`: `score` (value + grade), `findings` (severity / title / section / block), `registration`, `dns`, `mail`, `ai`, `web`, `certificates`, `surface`. `status` is `completed`, `partial`, `failed` or `in_progress` (ungraded). |
+| **Get Results (Legacy)** | `GET /scan/domain/results` | Frozen v1 payload: subdomains, DNS resolve / TXT, SSL, security.txt and robots.txt. |
+| **Get SSL Certificates** | `GET /domain/ssl` | Certificates seen in certificate transparency logs. |
+| **Capture Network Requests** | `GET /scan/domain/loadnetworkrequest` | Loads a page in a headless browser and lists every request it makes. |
+
+Node version 1.1 defaults **Output** to the v2 report. Workflows built on version 1 keep the legacy results until you switch Output.
 
 ### Core — IP Address
 
@@ -105,7 +110,7 @@ Pick a **Resource**, then an **Operation**. The node processes every input item 
 
 ## Examples
 
-**Enrich a domain on demand.** Webhook → **mlab.sh** (Resource: *Domain*, Operation: *Scan*, Wait for Completion: on) → use the returned subdomains / SSL / DNS data downstream.
+**Enrich a domain on demand.** Webhook → **mlab.sh** (Resource: *Domain*, Operation: *Scan*, Wait for Completion: on) → route on `score.grade` or the `findings` array of the returned v2 report.
 
 **Vulnerability watch.** Schedule Trigger (daily) → **mlab.sh** (Resource: *CVE*, Operation: *Get Latest*) → Filter on `severity = CRITICAL` → notify Slack / email.
 

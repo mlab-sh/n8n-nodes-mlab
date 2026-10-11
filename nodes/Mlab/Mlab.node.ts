@@ -75,7 +75,8 @@ export class Mlab implements INodeType {
 		name: 'mlab',
 		icon: { light: 'file:mlab.svg', dark: 'file:mlab.dark.svg' },
 		group: ['transform'],
-		version: 1,
+		version: [1, 1.1],
+		defaultVersion: 1.1,
 		usableAsTool: true,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description:
@@ -152,9 +153,18 @@ export class Mlab implements INodeType {
 							'Load a URL in a headless browser and list every request it makes. Counts as one domain scan.',
 					},
 					{
-						name: 'Get Results',
+						name: 'Get Report',
+						value: 'report',
+						action: 'Get the full report of a domain scan',
+						description:
+							'Whole scan (schema domain-report/2): score, findings, registration, DNS, mail, web, certificates and attack surface',
+					},
+					{
+						name: 'Get Results (Legacy)',
 						value: 'results',
-						action: 'Get the results of a domain scan',
+						action: 'Get the legacy results of a domain scan',
+						description:
+							'Frozen v1 payload: subdomains, DNS resolve and TXT, SSL and the well-known files. Use Get Report for the full scan.',
 					},
 					{
 						name: 'Get SSL Certificates',
@@ -166,6 +176,7 @@ export class Mlab implements INodeType {
 						name: 'Get Status',
 						value: 'status',
 						action: 'Get the status of a domain scan',
+						description: 'Pending, scanning (with done/total job progress) or success',
 					},
 					{
 						name: 'Scan',
@@ -184,7 +195,7 @@ export class Mlab implements INodeType {
 				default: '',
 				placeholder: 'example.com',
 				displayOptions: {
-					show: { resource: ['domain'], operation: ['scan', 'status', 'results', 'ssl'] },
+					show: { resource: ['domain'], operation: ['scan', 'status', 'report', 'results', 'ssl'] },
 				},
 				description: 'The domain to scan (without protocol)',
 			},
@@ -205,8 +216,40 @@ export class Mlab implements INodeType {
 				default: true,
 				displayOptions: { show: { resource: ['domain'], operation: ['scan'] } },
 				description:
-					'Whether to poll until the scan finishes and return the full results. If disabled, only the job acknowledgement is returned.',
+					'Whether to poll until the scan finishes and return its output. If disabled, only the job acknowledgement is returned.',
 			},
+			// Same parameter twice so version 1 nodes keep the legacy payload they
+			// were built against, while new nodes get the v2 report.
+			...[
+				{ version: [1], value: 'results' },
+				{ version: [1.1], value: 'report' },
+			].map(({ version, value }) => ({
+				displayName: 'Output',
+				name: 'output',
+				type: 'options' as const,
+				options: [
+					{
+						name: 'Report (V2)',
+						value: 'report',
+						description: 'Full scan: score, findings and every section',
+					},
+					{
+						name: 'Results (Legacy V1)',
+						value: 'results',
+						description: 'Subdomains, DNS, SSL and well-known files only',
+					},
+				],
+				default: value,
+				displayOptions: {
+					show: {
+						'@version': version,
+						resource: ['domain'],
+						operation: ['scan'],
+						waitForCompletion: [true],
+					},
+				},
+				description: 'Which payload to return once the scan finishes',
+			})),
 			{
 				displayName: 'Timeout (Seconds)',
 				name: 'timeout',
@@ -860,7 +903,8 @@ export class Mlab implements INodeType {
 							const timeout = this.getNodeParameter('timeout', i) as number;
 							const intervalMs = 4000;
 							const maxAttempts = Math.max(1, Math.ceil((timeout * 1000) / intervalMs));
-							responseData = await pollDomainScan.call(this, domain, maxAttempts, intervalMs);
+							const output = this.getNodeParameter('output', i, 'results') as 'report' | 'results';
+							responseData = await pollDomainScan.call(this, domain, output, maxAttempts, intervalMs);
 						} else {
 							responseData = launch;
 						}
@@ -868,8 +912,8 @@ export class Mlab implements INodeType {
 						responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/domain/status', {}, {
 							domain,
 						})) as IDataObject;
-					} else if (operation === 'results') {
-						responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/domain/results', {}, {
+					} else if (operation === 'report' || operation === 'results') {
+						responseData = (await mlabCoreApiRequest.call(this, 'GET', `/scan/domain/${operation}`, {}, {
 							domain,
 						})) as IDataObject;
 					} else if (operation === 'ssl') {

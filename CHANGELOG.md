@@ -2,6 +2,27 @@
 
 All notable changes to `@mlabsh/n8n-nodes-mlab`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.3.0 - 2026-11-05
+
+Catches up with the mlab.sh API of November 2026.
+
+### Added
+
+- **mlab.sh Trigger** node: starts a workflow on a webhook from mlab.sh (Generic format). Verifies `X-Mlab-Signature` (HMAC-SHA256 of `timestamp.body`) and the timestamp tolerance, answers 401 otherwise; de-duplicates mlab's retries on `X-Mlab-Delivery`; optional event filter over the whole event catalog. New **mlab.sh Webhook API** credential for the signing secret.
+- **Batch Triage → Triage** (`POST /scan/batch`): up to 200 indicators enriched from cache, no lookup spent.
+- **RedKit Audit → Launch / Get Status / Get Quota** (`/scan/redkit`).
+- **Watchdog Schedule → List / Create / Update / Delete** (`/scan/watchdog/*`), including daily domain-scan schedules.
+- **Case → List / Get / Create / Update / Delete / Add Indicators / Delete Indicator / Add Comment / Delete Comment** (`/cases/*`).
+- **Finding Tag → List / Add / Remove** (`/scan/finding-tags`) and **Monitoring Finding → Set Status** (`/scan/monitoring/finding-status`).
+- Every object response made with a key carries `rateLimit: {limit, remaining, resource, windowSeconds}`, read from the `X-RateLimit-*` headers.
+- `npm test`: builds, then checks the signature verification and the rate-limit reading.
+
+### Changed
+
+- A 401 now says the key is unknown, revoked or expired (keys expire after 90 days by default) and where to make a new one; a 429 says the quota is spent and how it refills.
+- The API key credential points to Organization settings → API keys, where keys now live.
+- File upload limit documented as 10 MB, 100 MB on paid plans.
+
 ## 1.2.0 - 2026-10-11
 
 Domain scan v2.

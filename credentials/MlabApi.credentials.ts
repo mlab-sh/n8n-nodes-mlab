@@ -24,7 +24,7 @@ export class MlabApi implements ICredentialType {
 			default: '',
 			required: true,
 			description:
-				'Your mlab.sh API key (starts with "mlab_"). Generate one under Account → Settings → API Keys.',
+				'Your mlab.sh API key (starts with "mlab_"). An owner or admin creates one in Organization settings → API keys, with the permissions this workflow needs. Keys expire after 90 days by default.',
 		},
 		{
 			displayName: 'Base URL',

@@ -16,6 +16,28 @@ import {
 	MLAB_ACTORS_BASE_URL,
 } from '../shared/GenericFunctions';
 
+/** RedKit plugins the API accepts (`VALID_PLUGINS` in api/v1/scan/redkit.rs). */
+const REDKIT_PLUGINS = [
+	'caa', 'clickjack', 'cmdi', 'content-discovery', 'cookies', 'cors', 'crawl', 'crlf', 'csp', 'csrf',
+	'cve', 'dirlisting', 'dirscan', 'dns', 'dnssec', 'email', 'graphql', 'headers', 'host-intel',
+	'hostheader', 'httpmethod', 'https-enforce', 'jwt', 'lfi', 'mixed-content', 'nosqli', 'openredirect',
+	'portscan', 'secrets', 'security-txt', 'sqli', 'sri', 'ssl', 'ssrf', 'ssti', 'subdomain',
+	'subtakeover', 'techdetect', 'tls-cipher', 'waf', 'websocket', 'whois', 'xss', 'xxe',
+].map((p) => ({ name: p, value: p }));
+
+/** One "Operation" picker, the shape every resource below repeats. */
+function operations(resource: string, options: Array<{ name: string; value: string; action: string; description?: string }>, def: string) {
+	return {
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options' as const,
+		noDataExpression: true,
+		displayOptions: { show: { resource: [resource] } },
+		options,
+		default: def,
+	};
+}
+
 /** Split a pasted list on commas, whitespace or new lines, dropping blanks and duplicates. */
 function splitList(raw: string): string[] {
 	return [...new Set(raw.split(/[\s,;]+/).filter(Boolean))];
@@ -80,7 +102,7 @@ export class Mlab implements INodeType {
 		usableAsTool: true,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description:
-			'mlab.sh security tooling: domain, IP, crypto, file, hash, URL, email, phone, MAC and IOC analysis, CVE search and threat actor intelligence',
+			'mlab.sh security tooling: domain, IP, crypto, file, hash, URL, email, phone, MAC and IOC analysis, batch triage, RedKit audits, watchdog schedules, cases, finding triage, CVE search and threat actor intelligence',
 		defaults: {
 			name: 'mlab.sh',
 		},
@@ -106,6 +128,12 @@ export class Mlab implements INodeType {
 								'phone',
 								'mac',
 								'ioc',
+								'batch',
+								'redkit',
+								'watchdog',
+								'case',
+								'findingTag',
+								'monitoring',
 							],
 					},
 				},
@@ -118,19 +146,25 @@ export class Mlab implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				options: [
+					{ name: 'Batch Triage', value: 'batch' },
+					{ name: 'Case', value: 'case' },
 					{ name: 'Crypto Address', value: 'crypto' },
 					{ name: 'CVE', value: 'cve' },
 					{ name: 'Domain', value: 'domain' },
 					{ name: 'Email Address', value: 'email' },
 					{ name: 'File', value: 'file' },
+					{ name: 'Finding Tag', value: 'findingTag' },
 					{ name: 'Hash', value: 'hash' },
 					{ name: 'IOC', value: 'ioc' },
 					{ name: 'IP Address', value: 'ip' },
 					{ name: 'MAC Address', value: 'mac' },
+					{ name: 'Monitoring Finding', value: 'monitoring' },
 					{ name: 'Phone Number', value: 'phone' },
 					{ name: 'Quota', value: 'quota' },
+					{ name: 'RedKit Audit', value: 'redkit' },
 					{ name: 'Threat Actor', value: 'threatActor' },
 					{ name: 'URL', value: 'url' },
+					{ name: 'Watchdog Schedule', value: 'watchdog' },
 				],
 				default: 'domain',
 			},
@@ -676,6 +710,377 @@ export class Mlab implements INodeType {
 			},
 
 			// ======================================================================
+			//                              Batch Triage
+			// ======================================================================
+			operations('batch', [
+				{
+					name: 'Triage',
+					value: 'triage',
+					action: 'Triage a list of indicators',
+					description:
+						'Type, de-duplicate and enrich up to 200 indicators from what mlab already holds. Spends no lookup: cold ones come back as needs_lookup.',
+				},
+			], 'triage'),
+			{
+				displayName: 'Indicators',
+				name: 'indicators',
+				type: 'string',
+				typeOptions: { rows: 6 },
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['batch'] } },
+				description: 'Pasted indicators (IPs, domains, URLs, hashes, emails…), one per line or mixed in text, up to 1 MB',
+			},
+
+			// ======================================================================
+			//                              RedKit
+			// ======================================================================
+			operations('redkit', [
+				{
+					name: 'Get Quota',
+					value: 'quota',
+					action: 'Get the RedKit audit quota',
+					description: 'Plan, used, limit and remaining audits (-1 means unlimited)',
+				},
+				{
+					name: 'Get Status',
+					value: 'status',
+					action: 'Get the status of a RedKit audit',
+					description: 'Status, and the raw result once completed',
+				},
+				{
+					name: 'Launch',
+					value: 'launch',
+					action: 'Launch a RedKit audit',
+					description: 'Audit a domain your organization has verified, with the chosen plugins',
+				},
+			], 'launch'),
+			{
+				displayName: 'Domain',
+				name: 'redkitDomain',
+				type: 'string',
+				required: true,
+				default: '',
+				placeholder: 'example.com',
+				displayOptions: { show: { resource: ['redkit'], operation: ['launch'] } },
+				description: 'A domain of your organization, verified in Infrastructure',
+			},
+			{
+				displayName: 'Plugins',
+				name: 'redkitPlugins',
+				type: 'multiOptions',
+				required: true,
+				default: [],
+				options: REDKIT_PLUGINS,
+				displayOptions: { show: { resource: ['redkit'], operation: ['launch'] } },
+				description: 'Checks to run',
+			},
+			{
+				displayName: 'Scan UUID',
+				name: 'redkitScanUuid',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['redkit'], operation: ['status'] } },
+				description: 'The scan_uuid returned by Launch',
+			},
+
+			// ======================================================================
+			//                              Watchdog
+			// ======================================================================
+			operations('watchdog', [
+				{
+					name: 'Create',
+					value: 'create',
+					action: 'Create a watchdog schedule',
+					description: 'Schedule a recurring domain scan or RedKit audit',
+				},
+				{ name: 'Delete', value: 'delete', action: 'Delete a watchdog schedule' },
+				{ name: 'List', value: 'list', action: 'List watchdog schedules' },
+				{
+					name: 'Update',
+					value: 'update',
+					action: 'Enable or disable a watchdog schedule',
+				},
+			], 'list'),
+			{
+				displayName: 'Scan Type',
+				name: 'watchdogScanType',
+				type: 'options',
+				default: 'domain',
+				displayOptions: { show: { resource: ['watchdog'], operation: ['create'] } },
+				options: [
+					{ name: 'Domain Scan', value: 'domain', description: 'Any domain: a supplier, a lookalike of your brand' },
+					{ name: 'RedKit Audit', value: 'redkit', description: 'A verified domain of your organization only' },
+				],
+			},
+			{
+				displayName: 'Domain',
+				name: 'watchdogDomain',
+				type: 'string',
+				required: true,
+				default: '',
+				placeholder: 'example.com',
+				displayOptions: { show: { resource: ['watchdog'], operation: ['create'] } },
+			},
+			{
+				displayName: 'Plugins',
+				name: 'watchdogPlugins',
+				type: 'multiOptions',
+				required: true,
+				default: [],
+				options: REDKIT_PLUGINS,
+				displayOptions: { show: { resource: ['watchdog'], operation: ['create'], watchdogScanType: ['redkit'] } },
+			},
+			{
+				displayName: 'Frequency',
+				name: 'frequency',
+				type: 'options',
+				default: 'weekly',
+				displayOptions: { show: { resource: ['watchdog'], operation: ['create'] } },
+				options: [
+					{ name: 'Daily', value: 'daily', description: 'Domain scans only' },
+					{ name: 'Weekly', value: 'weekly' },
+					{ name: 'Monthly', value: 'monthly' },
+				],
+			},
+			{
+				displayName: 'Day of Week',
+				name: 'dayOfWeek',
+				type: 'options',
+				default: 0,
+				displayOptions: { show: { resource: ['watchdog'], operation: ['create'], frequency: ['weekly'] } },
+				options: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(
+					(name, value) => ({ name, value }),
+				),
+			},
+			{
+				displayName: 'Day of Month',
+				name: 'dayOfMonth',
+				type: 'number',
+				default: 1,
+				typeOptions: { minValue: 1, maxValue: 28 },
+				displayOptions: { show: { resource: ['watchdog'], operation: ['create'], frequency: ['monthly'] } },
+			},
+			{
+				displayName: 'Hour (UTC)',
+				name: 'hour',
+				type: 'number',
+				default: 9,
+				typeOptions: { minValue: 0, maxValue: 23 },
+				displayOptions: { show: { resource: ['watchdog'], operation: ['create'] } },
+			},
+			{
+				displayName: 'Minute',
+				name: 'minute',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0, maxValue: 59 },
+				displayOptions: { show: { resource: ['watchdog'], operation: ['create'] } },
+			},
+			{
+				displayName: 'Schedule UUID',
+				name: 'scheduleUuid',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['watchdog'], operation: ['update', 'delete'] } },
+			},
+			{
+				displayName: 'Enabled',
+				name: 'enabled',
+				type: 'boolean',
+				default: true,
+				displayOptions: { show: { resource: ['watchdog'], operation: ['update'] } },
+				description: 'Whether the schedule runs',
+			},
+
+			// ======================================================================
+			//                              Cases
+			// ======================================================================
+			operations('case', [
+				{ name: 'Add Comment', value: 'addComment', action: 'Add a comment to a case' },
+				{
+					name: 'Add Indicators',
+					value: 'addIndicators',
+					action: 'Add indicators to a case',
+					description: 'Paste indicators; they are typed and de-duplicated',
+				},
+				{ name: 'Create', value: 'create', action: 'Create a case' },
+				{ name: 'Delete', value: 'delete', action: 'Delete a case' },
+				{ name: 'Delete Comment', value: 'deleteComment', action: 'Delete a comment from a case' },
+				{ name: 'Delete Indicator', value: 'deleteIndicator', action: 'Delete an indicator from a case' },
+				{
+					name: 'Get',
+					value: 'get',
+					action: 'Get a case',
+					description: 'One case with its indicators and comments',
+				},
+				{ name: 'List', value: 'list', action: 'List cases' },
+				{ name: 'Update', value: 'update', action: 'Update a case' },
+			], 'list'),
+			{
+				displayName: 'Case UUID',
+				name: 'caseUuid',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: {
+					show: {
+						resource: ['case'],
+						operation: ['get', 'update', 'delete', 'addIndicators', 'deleteIndicator', 'addComment', 'deleteComment'],
+					},
+				},
+			},
+			{
+				displayName: 'Title',
+				name: 'caseTitle',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['case'], operation: ['create'] } },
+			},
+			{
+				displayName: 'Summary',
+				name: 'caseSummary',
+				type: 'string',
+				typeOptions: { rows: 3 },
+				default: '',
+				displayOptions: { show: { resource: ['case'], operation: ['create'] } },
+			},
+			{
+				displayName: 'Update Fields',
+				name: 'caseUpdateFields',
+				type: 'collection',
+				placeholder: 'Add Field',
+				default: {},
+				displayOptions: { show: { resource: ['case'], operation: ['update'] } },
+				options: [
+					{
+						displayName: 'Status',
+						name: 'status',
+						type: 'options',
+						default: 'open',
+						options: [
+							{ name: 'Open', value: 'open' },
+							{ name: 'Closed', value: 'closed' },
+						],
+					},
+					{ displayName: 'Summary', name: 'summary', type: 'string', default: '' },
+					{ displayName: 'Title', name: 'title', type: 'string', default: '' },
+				],
+			},
+			{
+				displayName: 'Indicators',
+				name: 'caseIndicators',
+				type: 'string',
+				typeOptions: { rows: 4 },
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['case'], operation: ['addIndicators'] } },
+			},
+			{
+				displayName: 'Indicator UUID',
+				name: 'indicatorUuid',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['case'], operation: ['deleteIndicator'] } },
+			},
+			{
+				displayName: 'Comment',
+				name: 'commentBody',
+				type: 'string',
+				typeOptions: { rows: 3 },
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['case'], operation: ['addComment'] } },
+			},
+			{
+				displayName: 'On Indicator UUID',
+				name: 'commentIndicatorUuid',
+				type: 'string',
+				default: '',
+				displayOptions: { show: { resource: ['case'], operation: ['addComment'] } },
+				description: 'Attach the comment to one indicator of the case. Leave empty for the whole case.',
+			},
+			{
+				displayName: 'Comment UUID',
+				name: 'commentUuid',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['case'], operation: ['deleteComment'] } },
+			},
+
+			// ======================================================================
+			//                     Finding Tags / Monitoring Findings
+			// ======================================================================
+			operations('findingTag', [
+				{ name: 'Add', value: 'add', action: 'Tag a RedKit finding' },
+				{ name: 'List', value: 'list', action: 'List the tags of a RedKit scan' },
+				{ name: 'Remove', value: 'remove', action: 'Remove a tag from a RedKit finding' },
+			], 'list'),
+			{
+				displayName: 'Scan UUID',
+				name: 'tagScanUuid',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['findingTag'] } },
+				description: 'The RedKit scan the finding belongs to',
+			},
+			{
+				displayName: 'Finding ID',
+				name: 'findingId',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['findingTag'], operation: ['add', 'remove'] } },
+			},
+			{
+				displayName: 'Tag',
+				name: 'tag',
+				type: 'options',
+				default: 'false-positive',
+				displayOptions: { show: { resource: ['findingTag'], operation: ['add', 'remove'] } },
+				options: [
+					{ name: 'Accepted Risk', value: 'accepted-risk' },
+					{ name: 'False Positive', value: 'false-positive' },
+					{ name: 'Fixed', value: 'fixed' },
+					{ name: 'Review Later', value: 'review-later' },
+				],
+			},
+			operations('monitoring', [
+				{
+					name: 'Set Status',
+					value: 'setStatus',
+					action: 'Set the triage status of a monitoring finding',
+					description: 'Team and Enterprise plans. The linked issue tracker follows.',
+				},
+			], 'setStatus'),
+			{
+				displayName: 'Finding ID',
+				name: 'monitoringFindingId',
+				type: 'string',
+				required: true,
+				default: '',
+				displayOptions: { show: { resource: ['monitoring'] } },
+			},
+			{
+				displayName: 'Status',
+				name: 'monitoringStatus',
+				type: 'options',
+				default: 'false_positive',
+				displayOptions: { show: { resource: ['monitoring'] } },
+				options: [
+					{ name: 'Accepted Risk', value: 'accepted_risk' },
+					{ name: 'False Positive', value: 'false_positive' },
+					{ name: 'Open', value: 'open' },
+				],
+			},
+
+			// ======================================================================
 			//                              CVE
 			// ======================================================================
 			{
@@ -1018,6 +1423,91 @@ export class Mlab implements INodeType {
 						'GET',
 						`/limit/${scanType}`,
 					)) as IDataObject;
+				} else if (resource === 'batch') {
+					responseData = (await mlabCoreApiRequest.call(this, 'POST', '/scan/batch', {
+						indicators: this.getNodeParameter('indicators', i) as string,
+					})) as IDataObject;
+				} else if (resource === 'redkit') {
+					if (operation === 'launch') {
+						responseData = (await mlabCoreApiRequest.call(this, 'POST', '/scan/redkit', {
+							domain: (this.getNodeParameter('redkitDomain', i) as string).trim(),
+							plugins: this.getNodeParameter('redkitPlugins', i) as string[],
+						})) as IDataObject;
+					} else if (operation === 'status') {
+						responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/redkit/status', {}, {
+							uuid: this.getNodeParameter('redkitScanUuid', i) as string,
+						})) as IDataObject;
+					} else {
+						responseData = (await mlabCoreApiRequest.call(this, 'GET', '/scan/redkit/quota')) as IDataObject;
+					}
+				} else if (resource === 'watchdog') {
+					if (operation === 'list') {
+						const res = (await mlabCoreApiRequest.call(this, 'GET', '/scan/watchdog/list')) as IDataObject;
+						responseData = (res.schedules as IDataObject[]) ?? [];
+					} else if (operation === 'create') {
+						const scanType = this.getNodeParameter('watchdogScanType', i) as string;
+						const frequency = this.getNodeParameter('frequency', i) as string;
+						const body: IDataObject = {
+							scan_type: scanType,
+							domain: (this.getNodeParameter('watchdogDomain', i) as string).trim(),
+							frequency,
+							hour: this.getNodeParameter('hour', i) as number,
+							minute: this.getNodeParameter('minute', i) as number,
+						};
+						if (scanType === 'redkit') body.plugins = this.getNodeParameter('watchdogPlugins', i) as string[];
+						if (frequency === 'weekly') body.day_of_week = this.getNodeParameter('dayOfWeek', i) as number;
+						if (frequency === 'monthly') body.day_of_month = this.getNodeParameter('dayOfMonth', i) as number;
+						responseData = (await mlabCoreApiRequest.call(this, 'POST', '/scan/watchdog/create', body)) as IDataObject;
+					} else {
+						const body: IDataObject = { uuid: this.getNodeParameter('scheduleUuid', i) as string };
+						if (operation === 'update') body.enabled = this.getNodeParameter('enabled', i) as boolean;
+						responseData = (await mlabCoreApiRequest.call(this, 'POST', `/scan/watchdog/${operation}`, body)) as IDataObject;
+					}
+				} else if (resource === 'case') {
+					if (operation === 'list') {
+						const res = (await mlabCoreApiRequest.call(this, 'GET', '/cases')) as IDataObject;
+						responseData = (res.cases as IDataObject[]) ?? [];
+					} else if (operation === 'create') {
+						responseData = (await mlabCoreApiRequest.call(this, 'POST', '/cases/create', {
+							title: this.getNodeParameter('caseTitle', i) as string,
+							summary: this.getNodeParameter('caseSummary', i) as string,
+						})) as IDataObject;
+					} else {
+						const uuid = this.getNodeParameter('caseUuid', i) as string;
+						const route: Record<string, [string, () => IDataObject]> = {
+							get: ['/cases/detail', () => ({})],
+							update: ['/cases/update', () => this.getNodeParameter('caseUpdateFields', i, {}) as IDataObject],
+							delete: ['/cases/delete', () => ({})],
+							addIndicators: ['/cases/indicator/add', () => ({
+								indicators: this.getNodeParameter('caseIndicators', i) as string,
+							})],
+							deleteIndicator: ['/cases/indicator/delete', () => ({
+								indicator_uuid: this.getNodeParameter('indicatorUuid', i) as string,
+							})],
+							addComment: ['/cases/comment/add', () => {
+								const on = (this.getNodeParameter('commentIndicatorUuid', i, '') as string).trim();
+								return { body: this.getNodeParameter('commentBody', i) as string, ...(on ? { indicator_uuid: on } : {}) };
+							}],
+							deleteComment: ['/cases/comment/delete', () => ({
+								comment_uuid: this.getNodeParameter('commentUuid', i) as string,
+							})],
+						};
+						const [path, fields] = route[operation];
+						responseData = (await mlabCoreApiRequest.call(this, 'POST', path, { uuid, ...fields() })) as IDataObject;
+					}
+				} else if (resource === 'findingTag') {
+					const qs: IDataObject = { scan_uuid: this.getNodeParameter('tagScanUuid', i) as string };
+					if (operation !== 'list') {
+						qs.finding_id = this.getNodeParameter('findingId', i) as string;
+						qs.tag = this.getNodeParameter('tag', i) as string;
+					}
+					const path = operation === 'list' ? '/scan/finding-tags' : `/scan/finding-tags/${operation}`;
+					responseData = (await mlabCoreApiRequest.call(this, 'GET', path, {}, qs)) as IDataObject;
+				} else if (resource === 'monitoring') {
+					responseData = (await mlabCoreApiRequest.call(this, 'POST', '/scan/monitoring/finding-status', {
+						id: this.getNodeParameter('monitoringFindingId', i) as string,
+						status: this.getNodeParameter('monitoringStatus', i) as string,
+					})) as IDataObject;
 				} else if (resource === 'cve') {
 					if (operation === 'get') {
 						const cveId = (this.getNodeParameter('cveId', i) as string).trim().toUpperCase();
